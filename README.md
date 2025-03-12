@@ -38,8 +38,9 @@ For a sharded cluster
 5. Once all `SECONDARY` nodes for the given shard are upgraded, stepdown the `PRIMARY` and upgrade it
 6. Upgrade mongos
 7. Re-enable balancers
+8. Upgrade is complete
 
-The upgrade does not set the feature compatibility version (FCV) to the new relsease. Enabling these backwards-incompatible features can complicate the downgrade process since you must remove any persisted backwards-incompatible features before you downgrade. It is recommended that after upgrading, you allow your deployment to run without enabling these features for a burn-in period to ensure the likelihood of downgrade is minimal. When you are confident that the likelihood of downgrade is minimal, enable these features.
+The upgrade does not set the feature compatibility version (FCV) to the new release. Enabling these backwards-incompatible features can complicate the downgrade process since you must remove any persisted backwards-incompatible features before you downgrade. It is recommended that after upgrading, you allow your deployment to run without enabling these features for a burn-in period to ensure the likelihood of downgrade is minimal. When you are confident that the likelihood of downgrade is minimal, enable these features.
 
 
 ## Quick guide
