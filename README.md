@@ -47,11 +47,17 @@ The upgrade does not set the feature compatibility version (FCV) to the new rele
 1. Edit the `inventory` file 
 2. Edit the [groups_vars/all](group_vars/all) variables file to choose the options, passwords, ports, etc.
 3. Edit `ansible.cfg` ssh account to be used
-4. Run the `main.yml` playbook pointing Ansible to the desired inventory file. For example:
+4. Make sure ansible can connect to your cluster
 
 ```
 cd ./ansible
-ansible-playbook main.yml -i inventory
+ansible -i inventory all -m ping
+```
+
+5. Run the `main.yml` playbook pointing Ansible to the desired inventory file. For example:
+
+```
+ansible-playbook -i inventory main.yml
 ```
 
 The upgrade process takes around 15 min for a cluster with the following specs:

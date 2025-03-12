@@ -48,7 +48,7 @@
     - name: Replicaset node states
       debug:
         msg: |
-          "{{ rs_status.stdout }}"
+          "Replicaset {{ group_names }}: {{ rs_status.stdout }}"
       when: inventory_hostname == groups[group_names[0]][0] and arbiter is not defined and postupgrade is not defined # We just need to print the entire output once for each replicaset
       
 
