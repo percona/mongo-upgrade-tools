@@ -1,0 +1,21 @@
+[cfg]
+danielpslab-ansible-mongodb-cfg00
+danielpslab-ansible-mongodb-cfg01 
+danielpslab-ansible-mongodb-cfg02 
+
+[shard0]
+danielpslab-ansible-mongodb-shard00svr0
+danielpslab-ansible-mongodb-shard00svr1 
+danielpslab-ansible-mongodb-shard00arb0  arbiter=True
+
+[shard1]
+danielpslab-ansible-mongodb-shard01svr0
+danielpslab-ansible-mongodb-shard01svr1 
+danielpslab-ansible-mongodb-shard01arb0  arbiter=True
+
+
+[mongos]
+danielpslab-ansible-mongodb-mongos00 
+
+
+

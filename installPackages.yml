@@ -1,0 +1,34 @@
+- name: Install Percona key
+  rpm_key:
+    key: "{{ percona_key_location }}"
+    state: present
+
+- name: Install Percona repositories
+  package:
+    name: "{{ percona_repo }}"
+    state: latest
+
+- name: Disable all previously enabled percona repositories
+  shell: "/usr/bin/percona-release disable all"
+
+- name: Enable MongoDB {{ mongo_release }} and tools repository
+  shell: "/usr/bin/percona-release enable {{ mongo_release }} && /usr/bin/percona-release enable tools"
+
+- name: Enable PMM client repository
+  shell: "/usr/bin/percona-release enable {{ pmm_client_repo }}"
+
+# Mongod specific packages
+- name: Install MongoDB packages from repository -- Release {{ mongo_release }}
+  package:
+    name: "{{ item }}"
+    state: latest
+  with_items: "{{ packages }}"
+  when: "'mongos' not in group_names"
+
+# Mongos specific packages
+- name: Install Mongos packages from repository -- Release {{ mongo_release }}
+  package:
+    name: "{{ item }}"
+    state: latest
+  with_items: "{{ router_packages }}"
+  when: "'mongos' in group_names"

@@ -1,0 +1,76 @@
+- name: Include additional tasks
+  hosts: mongos
+  tasks:
+      - name: Include additional tasks
+        include_tasks: extras.yml 
+
+- name: Stop balancers 
+  hosts: mongos
+  gather_facts: true
+  become: yes
+  tags: 
+    - upgrade
+    - upgrade:lbStop
+  tasks:
+    - name: Stop the Mongos balancer
+      shell: >
+        mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "sh.stopBalancer()"
+      run_once: true 
+      when: lb == 'stop' 
+
+    - name: Check balancer status
+      shell: >
+        mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "sh.getBalancerState()"
+      register: balancer_state
+      changed_when: false
+      failed_when: false
+      run_once: true
+      when: lb == 'stop'
+
+    - name: Balancer status
+      debug:
+        msg: "Balancer Running Status: {{ balancer_state.stdout }}"  
+      run_once: true
+      when: lb == 'stop'   
+
+    - name: Fail if balancer is still running
+      fail:
+        msg: "Balancer is still running. Please stop the balancer before continuing."
+      when: lb == 'stop' and balancer_state.stdout != "false"
+      run_once: true
+
+
+- name: Start balancers  
+  hosts: mongos
+  gather_facts: true
+  become: yes
+  tags: 
+    - upgrade
+    - upgrade:lbStart
+  tasks:
+    - name: Start the Mongos balancer
+      shell: >
+        mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "sh.startBalancer()"
+      run_once: true
+      when: lb == 'start'  
+
+    - name: Check balancer status
+      shell: >
+        mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "sh.getBalancerState()"
+      register: balancer_state
+      changed_when: false
+      failed_when: false
+      run_once: true
+      when: lb == 'start'
+
+    - name: Balancer status
+      debug:
+        msg: "Balancer Running Status: {{ balancer_state.stdout }}"  
+      run_once: true  
+      when: lb == 'start' 
+
+    - name: Fail if balancer is not running
+      fail:
+        msg: "Balancer is not running. Please start the balancer before continuing."
+      when: lb == 'start' and balancer_state.stdout == "false"
+      run_once: true      

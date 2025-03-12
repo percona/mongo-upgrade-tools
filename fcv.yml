@@ -1,0 +1,114 @@
+- name: MongoDB Feature Compatibility Version Check
+  hosts: cfg:shard*:rs
+  become: yes
+  tags:
+    - upgrade
+    - upgrade:fcv
+  tasks:
+      - name: Check all inventory
+        block:
+        - name: Include additional tasks
+          include_tasks: extras.yml 
+
+        - name: Figure out the mongod port
+          shell: "grep -h -i port /etc/mongod.conf | awk '{print $2}' | head -1"
+          register: mongo_port_result
+          changed_when: false
+          failed_when: mongo_port_result.stdout == ""
+          when: arbiter is not defined
+
+        - name: Register the mongod port
+          set_fact:
+            mongo_port: "{{ mongo_port_result.stdout }}"
+          when: arbiter is not defined  
+
+        - name: Find out the current installed MongoDB version
+          shell: >
+            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "print(db.version().split('.').slice(0, 2).join('.'))"  
+          register: mdbVersion
+          when: arbiter is not defined
+          run_once: true # We only need to run this once since all servers in the cluster should be on the same version
+
+        - name: Store current MongoDB Version
+          set_fact:
+            mongoVersion: "{{ mdbVersion.stdout }}"
+          when: arbiter is not defined
+          run_once: true # We only need to run this once since all servers in the cluster should be on the same version   
+
+        - name: Check featureCompatibilityVersion on all members
+          shell: >
+            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "var fcv = db.adminCommand({ getParameter: 1, featureCompatibilityVersion: 1 }); print('version: \'' + fcv.featureCompatibilityVersion.version + '\'');"
+          register: fcv_check
+          when: arbiter is not defined  
+
+        - name: Store featureCompatibilityVersion
+          set_fact:
+            compatCheck: "{{ fcv_check.stdout }}"    
+          when: arbiter is not defined  
+
+        ###################### 
+        # Delegate to Mongos
+        ######################
+        # When working with a sharded cluster we need to delegate the tasks below to the mongos host since if fcv needs to be updated it has to be done via mongos
+        # If this playbook if for a NON sharded repicaset we have to do this on the primary for the replicaset instead, NOT the mongos
+        - name: Figure out the mongos port
+          shell: "grep -h -i port /etc/mongos.conf | awk '{print $2}' | head -1"
+          register: mongos_port_result
+          changed_when: false
+          failed_when: mongos_port_result.stdout == ""
+          delegate_to: "{{ groups.mongos | first }}"
+          run_once: true
+          when: arbiter is not defined and mongoVersion not in compatCheck and 'rs' not in group_names
+          
+        - name: Register the mongos port
+          set_fact:
+            mongos_port: "{{ mongos_port_result.stdout }}"
+          run_once: true
+          delegate_to: "{{ groups.mongos | first }}"
+          when: arbiter is not defined and mongoVersion not in compatCheck and 'rs' not in group_names
+
+        - name: Update featureCompatibilityVersion via Mongos
+          shell: >
+            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongos_port }} --eval "db.adminCommand( { setFeatureCompatibilityVersion: '{{ mongoVersion }}', confirm: true } )"
+          register: fcv_result  
+          delegate_to: "{{ groups.mongos | first }}"
+          run_once: true
+          when: arbiter is not defined and mongoVersion not in compatCheck and 'rs' not in group_names
+
+        - name: FCV Output
+          debug:
+            msg: | 
+              "{{ fcv_result.stdout }}" 
+          delegate_to: "{{ groups.mongos | first }}"  # This makes this command run on the 1st mongos routes. We only run this once since this updates the entire cluster
+          run_once: true 
+          when: arbiter is not defined and mongoVersion not in compatCheck and 'rs' not in group_names
+
+        ############################################
+        # Set FCV for replicaset (NON sharded envs)
+        ############################################
+        - name: Find the PRIMARY for replicaset {{ group_names }}
+          shell: >
+            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval 'db = db.getSiblingDB("admin"); var primaryHost = db.runCommand({ "replSetGetStatus": 1 }).members.filter(member => member.stateStr === "PRIMARY").map(member => member.name.split(":")[0]).join(""); print(primaryHost);'
+          register: rsPrimary
+          run_once: true
+          when: arbiter is not defined and mongoVersion not in compatCheck and 'rs' in group_names
+
+        - name: Register PRIMARY for replicaset {{ group_names }}
+          set_fact:
+            rsPrimaryNode: "{{ rsPrimary.stdout }}"  
+          run_once: true  
+          when: arbiter is not defined and mongoVersion not in compatCheck and 'rs' in group_names
+         
+        - name: Update featureCompatibilityVersion for replicaset {{ group_names }}
+          shell: >
+            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "db.adminCommand( { setFeatureCompatibilityVersion: '{{ mongoVersion }}', confirm: true } )"
+          register: rs_fcv_result  
+          run_once: true
+          when: arbiter is not defined and mongoVersion not in compatCheck and 'rs' in group_names and ansible_hostname == rsPrimaryNode
+
+        - name: FCV Output for replicaset {{ group_names }}
+          debug:
+            msg: | 
+              "{{ rs_fcv_result.stdout_lines }}" 
+          run_once: true 
+          when: arbiter is not defined and mongoVersion not in compatCheck and 'rs' in group_names and ansible_hostname == rsPrimaryNode         

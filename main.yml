@@ -1,0 +1,31 @@
+---
+# Validate version
+- import_playbook: validate.yml
+
+# Feature Compat Check
+- import_playbook: fcv.yml
+
+# Stop balancers
+- import_playbook: lb.yml
+  vars:
+    lb: "stop" # set this to control rather we stop or start the balancer
+
+# Upgrade replicasets
+- import_playbook: replicaset.yml
+
+# Upgrade shards
+- import_playbook: shard.yml
+
+# Upgrade mongos
+- import_playbook: mongos.yml
+  
+# Start balancers
+- import_playbook: lb.yml
+  vars:
+    lb: "start" # set this to control rather we stop or start the balancer
+
+# Validate post upgrade
+- import_playbook: validate.yml  
+  vars:
+    postupgrade: true 
+

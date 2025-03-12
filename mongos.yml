@@ -1,0 +1,48 @@
+##########################
+# Upgrade Mongos Routers
+##########################
+- name: Upgrade Mongos Routers
+  hosts: mongos
+  become: yes
+  tags:
+    - upgrade
+    - upgrade:mongos
+  tasks:
+    - name: Include additional tasks
+      include_tasks: extras.yml 
+
+    - name: Shutdown Mongos Router
+      service:
+        name: mongos
+        state: stopped 
+
+    - name: Install packages
+      include_tasks: installPackages.yml  
+
+    - name: Start Mongos Router
+      service:
+        name: mongos
+        state: started  
+
+    - name: Check Mongos Status
+      shell: >
+        mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "
+        var status = db.runCommand({ "serverStatus": 1 });
+        printjson({
+          host: status.host,
+          version: status.version,
+          process: status.process,
+          uptime: status.uptime,
+          health_state: status.health.state,
+          state_time: status.health.enteredStateAtTime
+        });
+        "
+      register: mongos_status
+      until: "'Ok' in mongos_status.stdout"
+      retries: 5
+      delay: 10
+
+    - name: Mongos status
+      debug:
+        msg: >-
+          {{ mongos_status.stdout_lines }}

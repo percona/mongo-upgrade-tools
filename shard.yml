@@ -1,0 +1,221 @@
+- name: Loop through all shard groups and find the PRIMARY for each specific replicaset
+  hosts: shard*
+  gather_facts: false
+  tags:
+    - upgrade
+    - upgrade:shard
+  tasks:
+    - name: Get all shard groups
+      set_fact:
+        groups_list: "{{ groups.keys() }}"
+
+    - name: Include additional tasks
+      include_tasks: extras.yml    
+
+    - name: Find out the current installed MongoDB version
+      shell: >
+        mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "print(db.version().split('.').slice(0, 2).join('.'))"  
+      register: mdbVersion
+      when: arbiter is not defined # We don't need to worry about the arbiter version since we'll make sure it matches all other nodes
+
+    # We only need to run the query below in one host of each shard, since the status would be the same for all hosts in the same shard
+    - name: Find the PRIMARY node for each shard
+      shell: >
+        mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval 'db = db.getSiblingDB("admin"); var primaryHost = db.runCommand({ "replSetGetStatus": 1 }).members.filter(member => member.stateStr === "PRIMARY").map(member => member.name.split(":")[0]).join(""); print(primaryHost);'
+      register: shardPrimaryResult
+      when: inventory_hostname == groups[group_names[0]][0] and arbiter is not defined
+
+    # Since the above was only ran in one host per shard group, we need to set_fact as shown below so it is available to all hosts in all shard groups
+    - name: Register PRIMARY nodes for all shard groups
+      set_fact:
+        shardPrimary: "{{ hostvars[groups[group_names[0]][0]].shardPrimaryResult.stdout }}"
+
+
+################################ 
+# Upgrade secondary shard nodes
+################################
+- name: Upgrade SECONDARY nodes
+  hosts: shard*
+  become: yes
+  tags:
+    - upgrade
+    - upgrade:shard
+  serial: 1 # This is required to make sure one host at a time is handled, otherwise each task will run for each node in sequence
+  tasks:
+    - name: Upgrade SECONDARY nodes
+      block:
+        - name: Shutdown SECONDARY node
+          shell: >
+            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "db.adminCommand( { shutdown: 1 } )"
+          register: shutdownOutput
+          failed_when: 
+            - shutdownOutput.rc == 1
+            - '"MongoNetworkError" not in shutdownOutput.stderr'
+          when: ansible_hostname != shardPrimary
+
+        ##########################################
+        # The 2 tasks below only apply to arbiters
+        ##########################################
+        - name: Figure out the arbiter data path
+          shell: "grep -h -i dbPath /etc/mongod.conf | awk '{print $2}' | head -1"
+          register: dbpath
+          changed_when: false
+          failed_when: dbpath.stdout == ""
+          when: ansible_hostname != shardPrimary and arbiter is defined       
+
+        - name: Cleanup ARBITER node
+          shell: rm -rf {{ dbpath.stdout }}/*
+          when: ansible_hostname != shardPrimary and arbiter is defined  
+        ################################
+        # end of arbiter specific tasks
+        ################################  
+        - name: Install packages
+          include_tasks: installPackages.yml
+          when: ansible_hostname != shardPrimary  
+
+        - name: Start SECONDARY node
+          service:
+            name: mongod
+            state: started  
+          when: ansible_hostname != shardPrimary
+
+        - name: Wait for the SECONDARY node to recover
+          shell: >
+            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "
+            rs.status().members
+              .filter((member) => /{{ ansible_hostname }}/.test(member.name))
+              .map((member) => ({
+                _id: member._id,
+                name: member.name,
+                health: member.health,
+                stateStr: member.stateStr,
+                syncSourceHost: member.syncSourceHost
+              }));
+            "
+          register: shard_status
+          until: "'SECONDARY' in shard_status.stdout or 'ARBITER' in shard_status.stdout"
+          retries: 5
+          delay: 10
+          when: ansible_hostname != shardPrimary
+    
+        - name: Node state
+          debug:
+            msg: |
+              {{ shard_status.stdout_lines }}
+          when: ansible_hostname != shardPrimary  
+
+
+############################################################################################################################################
+# We need to separate the upgrade for the primary into its own task since we have to use serial in order to upgrade one node at a time
+# This means once the above tasks are complete the only remaining node left to upgrade is the current PRIMARY for each shard
+############################################################################################################################################          
+- name: Upgrade PRIMARY Node
+  hosts: shard*
+  become: yes
+  tags:
+    - upgrade
+    - upgrade:shard
+  # serial is required to make sure one host at a time is handled, otherwise each task will run for each node in sequence. 
+  # We still use this method since we could have multiple shards and we want each shard to be completed before moving to the next
+  serial: 1 
+  tasks:
+    - name: Upgrade PRIMARY node
+      block:
+        - name: Stepdown PRIMARY node
+          shell: mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "rs.stepDown()"
+          run_once: true
+          when: ansible_hostname == shardPrimary  
+
+        - name: Wait for a new PRIMARY node to be elected
+          shell: >
+            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "
+            rs.status().members.map((member) => ({
+              _id: member._id,
+              name: member.name,
+              health: member.health,
+              stateStr: member.stateStr,
+              syncSourceHost: member.syncSourceHost
+            }));
+            "
+          register: stepdown_status
+          until: "'PRIMARY' in stepdown_status.stdout"
+          retries: 5
+          delay: 10
+          run_once: true
+          when: ansible_hostname == shardPrimary
+
+        - name: Shutdown former PRIMARY node
+          shell: >
+            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "db.adminCommand( { shutdown: 1 } )"
+          register: shutdownOutput
+          failed_when: 
+            - shutdownOutput.rc == 1
+            - '"MongoNetworkError" not in shutdownOutput.stderr'
+          when: ansible_hostname == shardPrimary          
+          
+        - name: Install packages
+          include_tasks: installPackages.yml
+          when: ansible_hostname == shardPrimary  
+
+        - name: Start former PRIMARY node
+          service:
+            name: mongod
+            state: started  
+          when: ansible_hostname == shardPrimary
+
+        - name: Wait for the former PRIMARY node to recover and become SECONDARY
+          shell: >
+            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "
+            rs.status().members
+              .filter((member) => /{{ ansible_hostname }}/.test(member.name))
+              .map((member) => ({
+                _id: member._id,
+                name: member.name,
+                health: member.health,
+                stateStr: member.stateStr,
+                syncSourceHost: member.syncSourceHost
+              }));
+            "
+          register: shard_status
+          until: "'SECONDARY' in shard_status.stdout"
+          retries: 5
+          delay: 10
+          when: ansible_hostname == shardPrimary
+    
+        - name: Node state
+          debug:
+            msg: |
+              {{ shard_status.stdout_lines }}
+          when: ansible_hostname == shardPrimary  
+
+
+#######################################
+# Get replicaset status for all shards
+#######################################
+- name: Shard Replicaset Status
+  hosts: shard*
+  become: yes
+  tags:
+    - upgrade
+    - upgrade:shard
+  tasks:
+    - name: Get replicaset status for all shards
+      shell: >
+        mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "
+        rs.status().members
+          .map((member) => ({
+            _id: member._id,
+            name: member.name,
+            health: member.health,
+            stateStr: member.stateStr,
+            syncSourceHost: member.syncSourceHost
+          }));
+        "
+      register: rs_status
+      when: ansible_hostname == shardPrimary
+
+    - name: Replicaset status
+      debug:
+        msg: |
+          {{ rs_status.stdout_lines }}
+      when: ansible_hostname == shardPrimary 

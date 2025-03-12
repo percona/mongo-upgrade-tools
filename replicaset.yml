@@ -1,0 +1,175 @@
+- name: Include additional tasks
+  hosts: cfg:rs 
+  become: yes
+  tags:
+    - upgrade
+  tasks:
+    - name: Include additional tasks
+      include_tasks: extras.yml   
+
+    - name: "Backup config database {{ backup_dir }}"
+      command: mongodump --authenticationDatabase admin -u {{ pbmuser }} -p {{ pbmpwd }} --port {{ mongo_port }} --db config --out {{ backup_dir }}
+      when: "'cfg' in group_names "  # This task only needs to be done for sharded envs and from a cfg server  
+      ignore_errors: yes
+
+##########################
+# Upgrade secondary nodes
+##########################
+- name: Upgrade SECONDARY Nodes
+  hosts: cfg:rs
+  become: yes
+  tags:
+    - upgrade
+  serial: 1 # This is required to make sure one host at a time is handled, otherwise each task will run for each node in sequence
+  tasks:
+    - name: Find the PRIMARY node
+      shell: >
+        mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval 'db = db.getSiblingDB("admin"); var primaryHost = db.runCommand({ "replSetGetStatus": 1 }).members.filter(member => member.stateStr === "PRIMARY").map(member => member.name.split(":")[0]).join(""); print(primaryHost);'
+      register: primaryNodeResult
+      run_once: true
+
+    - name: Register PRIMARY
+      set_fact:
+        primaryNode: "{{ primaryNodeResult.stdout }}"  
+      run_once: true  
+
+    - name: Upgrade SECONDARY nodes
+      block: 
+        - name: Shutdown SECONDARY node
+          shell: >
+            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "db.adminCommand( { shutdown: 1 } )"
+          register: shutdownOutput
+          failed_when: 
+            - shutdownOutput.rc == 1
+            - '"MongoNetworkError" not in shutdownOutput.stderr'
+          when: ansible_hostname != primaryNode
+          
+        - name: Install packages
+          include_tasks: installPackages.yml
+          when: ansible_hostname != primaryNode  
+
+        - name: Start SECONDARY node
+          service:
+            name: mongod
+            state: started  
+          when: ansible_hostname != primaryNode
+
+        - name: Wait for SECONDARY node to recover
+          shell: >
+            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "
+            rs.status().members
+              .filter((member) => /{{ ansible_hostname }}/.test(member.name))
+              .map((member) => ({
+                _id: member._id,
+                name: member.name,
+                health: member.health,
+                stateStr: member.stateStr,
+                syncSourceHost: member.syncSourceHost
+              }));
+            "
+          register: rs_status
+          until: "'SECONDARY' in rs_status.stdout"
+          retries: 5
+          delay: 10
+          when: ansible_hostname != primaryNode
+    
+        - name: Node state
+          debug:
+            msg: |
+              {{ rs_status.stdout_lines }}
+          when: ansible_hostname != primaryNode
+
+
+############################################################################################################################################
+# We need to separate the upgrade for the primary into its own task since we have to use serial in order to upgrade one secondary at a time
+# This means once the above tasks are complete the only remaining node left to upgrade is the current PRIMARY
+############################################################################################################################################
+- name: Upgrade PRIMARY Node
+  hosts: cfg:rs
+  become: yes
+  tags:
+    - upgrade
+  tasks:
+    - name: Find the PRIMARY node
+      shell: >
+        mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval 'db = db.getSiblingDB("admin"); var primaryHost = db.runCommand({ "replSetGetStatus": 1 }).members.filter(member => member.stateStr === "PRIMARY").map(member => member.name.split(":")[0]).join(""); print(primaryHost);'
+      register: primaryNodeUprgadeResult
+      run_once: true
+
+    - name: Register PRIMARY
+      set_fact:
+        primaryNodeUpgrade: "{{ primaryNodeUprgadeResult.stdout }}"  
+      run_once: true  
+
+    - name: Stepdown PRIMARY node
+      shell: mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "rs.stepDown()"
+      run_once: true
+      when: ansible_hostname == primaryNodeUpgrade  
+
+    - name: Wait for a new PRIMARY to be elected
+      shell: >
+        mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "
+        rs.status().members.map((member) => ({
+          _id: member._id,
+          name: member.name,
+          health: member.health,
+          stateStr: member.stateStr,
+          syncSourceHost: member.syncSourceHost
+        }));
+        "
+      register: stepdown_status
+      until: "'PRIMARY' in stepdown_status.stdout"
+      retries: 5
+      delay: 10
+      run_once: true
+      when: ansible_hostname == primaryNodeUpgrade
+
+    - name: Upgrade former PRIMARY node
+      block:
+        - name: Shutdown former PRIMARY node
+          shell: >
+            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "db.adminCommand( { shutdown: 1 } )"
+          register: shutdownOutput
+          failed_when: 
+            - shutdownOutput.rc == 1
+            - '"MongoNetworkError" not in shutdownOutput.stderr'
+          when: ansible_hostname == primaryNode
+
+        - name: Install packages
+          include_tasks: installPackages.yml
+          when: ansible_hostname == primaryNodeUpgrade 
+
+        - name: Start former PRIMARY node
+          service:
+            name: mongod
+            state: started  
+          when: ansible_hostname == primaryNodeUpgrade
+
+        - name: Wait for the former PRIMARY node to recover and become SECONDARY
+          shell: >
+            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "
+            rs.status().members
+              .filter((member) => /{{ ansible_hostname }}/.test(member.name))
+              .map((member) => ({
+                _id: member._id,
+                name: member.name,
+                health: member.health,
+                stateStr: member.stateStr,
+                syncSourceHost: member.syncSourceHost
+              }));
+            "
+          register: rs_status
+          until: "'SECONDARY' in rs_status.stdout"
+          retries: 5
+          delay: 10
+          when: ansible_hostname == primaryNodeUpgrade
+    
+        - name: Node state
+          debug:
+            msg: |
+              {{ rs_status.stdout_lines }}
+          when: ansible_hostname == primaryNodeUpgrade
+
+
+
+  

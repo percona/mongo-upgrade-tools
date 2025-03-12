@@ -1,0 +1,67 @@
+#########################
+## General configuration
+#########################
+
+percona_key_location: https://repo.percona.com/yum/PERCONA-PACKAGING-KEY
+percona_repo: https://repo.percona.com/yum/percona-release-latest.noarch.rpm
+
+# MongoDB version as per "percona-release". Availability of MongoDB versions depend on the OS version.
+# e.g. -> Available repositories: Any repo starting from psmdb-60. This means we support automated upgrades for clusters running at least MongoDB 5.0
+# mongo_release: psmdb-60
+mongo_release: psmdb-70
+# mongo_release: psmdb-80
+
+# packages and router_packages lists 
+# you can use a specific version instead of the default `latest` by passing the package names and version e.g. percona-server-mongodb-7.0.12-7.el9
+packages:
+  - percona-server-mongodb
+  - percona-backup-mongodb
+  - pmm2-client
+
+router_packages:
+  - percona-server-mongodb-mongos 
+  - percona-mongodb-mongosh
+  - pmm2-client
+
+
+#####################
+# MongoDB admin user
+#####################
+
+mongo_root_user: your_mongodb_user
+mongo_root_password: your_mongodb_password
+
+
+##################
+## Authentication
+##################
+
+# use_tls: true/false. Controls if Mongo uses keyfile or x509 certificates for member authentication. Also controls if clients need to use TLS to connect.
+use_tls: false
+
+# The next 2 options are only relevant if use_tls: true
+certificateKeyFile: /etc/ssl/test-server.pem
+CAFile: /etc/ssl/test-ca.pem
+
+
+##################
+## Monitoring
+##################
+
+#pmm_client_repo: pmm2-client experimental
+pmm_client_repo: pmm2-client
+#pmm_client_repo: pmm3-client
+
+###############
+## Backup
+###############
+
+# PBM is used to take the backup of the config database for sharded clusters. This is done as a precaution before upgrading the sharded 
+# cluster as [best practices](https://www.mongodb.com/docs/v7.0/release-notes/7.0-upgrade-sharded-cluster/#back-up-the-config-database).
+
+pbmuser: your_pbm_user
+pbmpwd: your_pbm_password
+
+# Path where cfg mongodump backups are stored
+backup_dir: "/tmp/backup" 
+

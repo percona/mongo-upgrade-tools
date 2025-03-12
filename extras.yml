@@ -1,0 +1,22 @@
+- name: Set up extra arguments for Mongo client TLS 
+  set_fact:
+    mongo_extra_args: " --tls --tlsCertificateKeyFile {{ certificateKeyFile }} --tlsCAFile {{ certificateKeyFile }}  "
+  when: use_tls | bool
+
+- name: Figure out the mongod/mongos port
+  shell: "grep -h -i port /etc/mongo?.conf | awk '{print $2}' | head -1"
+  register: mongo_port_result
+  changed_when: false
+  failed_when: mongo_port_result.stdout == ""
+
+- name: Register the mongod port
+  set_fact:
+    mongo_port: "{{ mongo_port_result.stdout }}"
+
+- name: Find original percona repository
+  shell: percona-release show | grep psmdb | awk '{print $1}' 
+  register: old_repo
+
+- name: Store original repository
+  set_fact:
+    original_percona_repository: "{{ old_repo.stdout }}"  
