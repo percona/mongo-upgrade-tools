@@ -16,6 +16,3 @@ danielpslab-ansible-mongodb-shard01arb0  arbiter=True
 
 [mongos]
 danielpslab-ansible-mongodb-mongos00 
-
-
-

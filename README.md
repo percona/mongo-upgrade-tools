@@ -44,9 +44,9 @@ The upgrade does not set the feature compatibility version (FCV) to the new rele
 
 
 ## Quick guide
-1. Edit the `inventory` file 
-2. Edit the [groups_vars/all](group_vars/all) variables file to choose the options, passwords, ports, etc.
-3. Edit `ansible.cfg` ssh account to be used
+1. Rename the template file `inventory_template` to `inventory` and make the necessary changes according to your environment 
+2. Rename the template file [groups_vars/all_template](group_vars/all_template) to `group_vars/all` and edit the new file variables file to choose the options, passwords, ports, etc.
+3. Rename the template file `ansible.cfg_template` to `ansible.cfg` and edit the new file ssh account to be used
 4. Make sure ansible can connect to your cluster
 
 ```

@@ -64,4 +64,3 @@ pbmpwd: your_pbm_password
 
 # Path where cfg mongodump backups are stored
 backup_dir: "/tmp/backup" 
-

@@ -1,0 +1,5 @@
+**ansible.cfg
+**inventory
+group_vars/all
+.DS_Store
+**notes.txt
