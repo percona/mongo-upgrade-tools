@@ -5,7 +5,9 @@ from the given release, starting from psmdb-60. This means automated upgrades ar
 
 The upgrade process checks all components of the cluster and will produce warnings and abort the upgrade if any component is running a version older than 1 version prior to the version you are trying to upgrade.  In other words, you can not skip major versions during an upgrade (you can't upgrade from 5.0 to 7.0, you would have to go from 5.0 to 6.0 and so on.)
 
-In addition, the automated process verifies the cluster's health and each node's state and it will only proceed with the upgrade if all nodes are healthy and there are no issues with any host. If the upgrade detects any node state other than `PRIMARY`, `SECONDARY` or `ARBITER` it will not proceed with the upgrade.
+The upgrade process verifies the cluster's health and each node's state and it will only proceed with the upgrade if all nodes are healthy and there are no issues with any host. If the upgrade detects any node state other than `PRIMARY`, `SECONDARY` or `ARBITER` it will not proceed with the upgrade.
+
+To upgrade a MongoDB cluster, each replicaset must have at least 3 healthy nodes (non cfg nodes), which can be in any of the states: PRIMARY, SECONDARY, or ARBITER. The automated upgrade process will verify that each replicaset meets this requirement in order for the cluster to remain operational during the upgrade. This is to prevent replica sets with only two nodes from being shut down during the upgrade, as doing so would prevent the cluster from electing a new primary, potentially causing downtime. There is no minimum number of cfg nodes required, as long as they are all healthy.
 
 Since this is an automated process, it assumes that you have already completed the necessary due diligence to ensure a smooth and successful upgrade. Here are some key recommendations to review:
 

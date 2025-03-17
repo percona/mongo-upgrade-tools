@@ -48,9 +48,34 @@
     - name: Replicaset node states
       debug:
         msg: |
-          "Replicaset {{ group_names }}: {{ rs_status.stdout }}"
+          Replicaset {{ group_names | join(', ') }}: {{ rs_status.stdout }}
       when: inventory_hostname == groups[group_names[0]][0] and arbiter is not defined and postupgrade is not defined # We just need to print the entire output once for each replicaset
       
+    # Each replicaset has to have at least 3 nodes before upgrading (or we could end up with no PRIMARY)
+    # There is no minimum number of cfg nodes required, as long as they are all healthy, which is handled by the previous validations
+    # The following states are used to validate if we have enough live nodes (at least 3) per replicaset (non config servers)
+    # ['PRIMARY', 'SECONDARY', 'ARBITER']     
+    - name: Validate minimum 3 healthy nodes per replicaset (non cfg nodes)
+      shell: >
+        mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "
+        const statesToCount = ['PRIMARY', 'SECONDARY', 'ARBITER'];
+        rs.status().members.filter((member) => statesToCount.includes(member.stateStr)).length;
+        "
+      register: rs_active_count
+      delegate_to: "{{ groups[group_names[0]][0] }}" # Delegate this task to run on the first host in each group
+      when: postupgrade is not defined and 'cfg' not in group_names
+
+    - name: Fail if there are less than 3 healthy nodes in any replicaset (non cfg nodes)
+      fail:
+        msg: |
+          Not enough replicaset healthy nodes available to proceed with the upgrade. 
+          Replicaset: {{ group_names | join(', ') }}
+          Minimum required: 3, healthy nodes: {{ rs_active_count.stdout }}
+      delegate_to: "{{ groups[group_names[0]][0] }}" # Delegate this task to run on the first host in each group
+      when: postupgrade is not defined and 'cfg' not in group_names and (rs_active_count.stdout | int) < 3
+
+
+
 
 ####################
 # Mongod Validation
