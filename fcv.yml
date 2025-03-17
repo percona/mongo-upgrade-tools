@@ -67,12 +67,15 @@
           delegate_to: "{{ groups.mongos | first }}"
           when: arbiter is not defined and mongoVersion not in compatCheck and 'rs' not in group_names
 
+        # This task may take a while to run if the cluster is busy, so we make sure it doesn't time out 
         - name: Update featureCompatibilityVersion via Mongos
           shell: >
             mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongos_port }} --eval "db.adminCommand( { setFeatureCompatibilityVersion: '{{ mongoVersion }}', confirm: true } )"
           register: fcv_result  
           delegate_to: "{{ groups.mongos | first }}"
           run_once: true
+          async: 600  # Set the task to run for a maximum of 600 seconds (10 minutes)
+          poll: 10    # Poll every 10 seconds to check for completion
           when: arbiter is not defined and mongoVersion not in compatCheck and 'rs' not in group_names
 
         - name: FCV Output
@@ -99,11 +102,14 @@
           run_once: true  
           when: arbiter is not defined and mongoVersion not in compatCheck and 'rs' in group_names
          
+        # This task may take a while to run if the cluster is busy, so we make sure it doesn't time out         
         - name: Update featureCompatibilityVersion for replicaset {{ group_names }}
           shell: >
             mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "db.adminCommand( { setFeatureCompatibilityVersion: '{{ mongoVersion }}', confirm: true } )"
           register: rs_fcv_result  
           run_once: true
+          async: 600  # Set the task to run for a maximum of 600 seconds (10 minutes)
+          poll: 10    # Poll every 10 seconds to check for completion
           when: arbiter is not defined and mongoVersion not in compatCheck and 'rs' in group_names and ansible_hostname == rsPrimaryNode
 
         - name: FCV Output for replicaset {{ group_names }}
