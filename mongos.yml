@@ -7,6 +7,7 @@
   tags:
     - upgrade
     - upgrade:mongos
+  serial: 1 # This is required to make sure only one Mongos at a time is handled. This is to prevent outages caused if all Mongos routers are brought down simultaneously  
   tasks:
     - name: Include additional tasks
       include_tasks: extras.yml 

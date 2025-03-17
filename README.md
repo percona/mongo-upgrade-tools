@@ -1,7 +1,6 @@
 # Upgrade MongoDB clusters using Ansible
 
-This tool currently supports deployments on Red Hat-based distributions, including Amazon Linux 2023. The MongoDB version is determined by the [Percona Release](https://docs.percona.com/percona-software-repositories/percona-release.html), and the availability of MongoDB versions depends on the operating system version. The upgrade installs the latest available version
-from the given release, starting from psmdb-60. This means automated upgrades are available for clusters running MongoDB 5.0 or later. If your cluster is running a version prior to 5.0, you must manually upgrade it before utilizing the automated upgrade process.
+This tool currently supports deployments on Red Hat-based distributions, including Amazon Linux 2023. The MongoDB version is determined by the [Percona Release](https://docs.percona.com/percona-software-repositories/percona-release.html), and the availability of MongoDB versions depends on the operating system version. The upgrade installs the latest available version from the given release, starting from psmdb-60. This means automated upgrades are available for clusters running MongoDB 5.0 or later. If your cluster is running a version prior to 5.0, you must manually upgrade it before utilizing the automated upgrade process.
 
 The upgrade process checks all components of the cluster and will produce warnings and abort the upgrade if any component is running a version older than 1 version prior to the version you are trying to upgrade.  In other words, you can not skip major versions during an upgrade (you can't upgrade from 5.0 to 7.0, you would have to go from 5.0 to 6.0 and so on.)
 
@@ -9,7 +8,7 @@ The upgrade process verifies the cluster's health and each node's state and it w
 
 To upgrade a MongoDB cluster, each replicaset must have at least 3 healthy nodes (non cfg nodes), which can be in any of the states: PRIMARY, SECONDARY, or ARBITER. The automated upgrade process will verify that each replicaset meets this requirement in order for the cluster to remain operational during the upgrade. This is to prevent replica sets with only two nodes from being shut down during the upgrade, as doing so would prevent the cluster from electing a new primary, potentially causing downtime. There is no minimum number of cfg nodes required, as long as they are all healthy.
 
-Since this is an automated process, it assumes that you have already completed the necessary due diligence to ensure a smooth and successful upgrade. Here are some key recommendations to review:
+Since this is an automated process, it assumes that you have already completed the necessary due diligence to ensure a smooth and successful upgrade. Although this is an automated process, you are still responsible for choosing the best time of day to perform the upgrade based on your workload, in addition to following the recommendations below:
 
 1. Review MongoDB Version Compatibility
 2. Check for Deprecated Features or Parameters
@@ -38,7 +37,7 @@ For a sharded cluster
 3. Once all `SECONDARY` cfg nodes are upgraded, the `PRIMARY` cfg node is stepped down and upgraded
 4. Upgrade all shards. Each shard is upgraded in a rolling fashion, 1 `SECONDARY` node at a time
 5. Once all `SECONDARY` nodes for the given shard are upgraded, stepdown the `PRIMARY` and upgrade it
-6. Upgrade mongos
+6. Upgrade 1 Mongos router at a time to prevent outages
 7. Re-enable balancers
 8. Upgrade is complete
 
