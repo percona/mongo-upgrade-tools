@@ -69,8 +69,8 @@
       run_once: true  
       when: lb == 'start' 
 
-    - name: Fail if balancer is not running
-      fail:
-        msg: "Balancer is not running. Please start the balancer before continuing."
+    - name: Notify if balancer is not running
+      debug:
+        msg: "Balancer could not be started. Please review the logs and start the balancer manually."
       when: lb == 'start' and balancer_state.stdout == "false"
       run_once: true      
