@@ -9,7 +9,7 @@
 
     - name: "Backup config database {{ backup_dir }}"
       command: mongodump --authenticationDatabase admin -u {{ pbmuser }} -p {{ pbmpwd }} --port {{ mongo_port }} --db config --out {{ backup_dir }}
-      when: "'cfg' in group_names "  # This task only needs to be done for sharded envs and from a cfg server  
+      when: '"cfg" in group_names and backup_cfg | bool' # This task only needs to be done for sharded envs and from a cfg server and when enabled 
       ignore_errors: yes
 
 ##########################
@@ -169,7 +169,3 @@
             msg: |
               {{ rs_status.stdout_lines }}
           when: ansible_hostname == primaryNodeUpgrade
-
-
-
-  

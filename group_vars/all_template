@@ -56,9 +56,11 @@ pmm_client_repo: pmm2-client
 ## Backup
 ###############
 
-# PBM is used to take the backup of the config database for sharded clusters. This is done as a precaution before upgrading the sharded 
-# cluster as [best practices](https://www.mongodb.com/docs/v7.0/release-notes/7.0-upgrade-sharded-cluster/#back-up-the-config-database).
+# If set to true, we take a backup of the config database for sharded clusters. Default is false
+# https://www.mongodb.com/docs/v7.0/release-notes/7.0-upgrade-sharded-cluster/#back-up-the-config-database
+backup_cfg: false
 
+# PBM is used to take the backup of the config 
 pbmuser: your_pbm_user
 pbmpwd: your_pbm_password
 
