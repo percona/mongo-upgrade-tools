@@ -36,13 +36,12 @@
     - name: Upgrade SECONDARY nodes
       block: 
         - name: Shutdown SECONDARY node
-          shell: >
-            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "db.adminCommand( { shutdown: 1 } )"
-          register: shutdownOutput
-          failed_when: 
-            - shutdownOutput.rc == 1
-            - '"MongoNetworkError" not in shutdownOutput.stderr'
-          when: ansible_hostname != primaryNode
+          service:
+            name: mongod
+            state: stopped  
+          async: 300  # Set the task to run for a maximum of 300 seconds (5 minutes)
+          poll: 10    # Poll every 10 seconds to check for completion  
+          when: ansible_hostname != primaryNode  
           
         - name: Install packages
           include_tasks: installPackages.yml
@@ -127,13 +126,12 @@
     - name: Upgrade former PRIMARY node
       block:
         - name: Shutdown former PRIMARY node
-          shell: >
-            mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "db.adminCommand( { shutdown: 1 } )"
-          register: shutdownOutput
-          failed_when: 
-            - shutdownOutput.rc == 1
-            - '"MongoNetworkError" not in shutdownOutput.stderr'
-          when: ansible_hostname == primaryNode
+          service:
+            name: mongod
+            state: stopped  
+          async: 300  # Set the task to run for a maximum of 300 seconds (5 minutes)
+          poll: 10    # Poll every 10 seconds to check for completion  
+          when: ansible_hostname == primaryNodeUpgrade 
 
         - name: Install packages
           include_tasks: installPackages.yml
