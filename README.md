@@ -35,7 +35,7 @@ For a sharded cluster
 1. Disable balancers
 2. Upgrade 1 `SECONDARY` cfg node at a time 
 3. Once all `SECONDARY` cfg nodes are upgraded, the `PRIMARY` cfg node is stepped down and upgraded
-4. Upgrade all shards. Each shard is upgraded in a rolling fashion, 1 `SECONDARY` node at a time
+4. Upgrade all shards. Each shard is upgraded in a rolling fashion. The automated process selects 1 `SECONDARY` node from each existing shard and it upgrades these nodes simulataneously (i.e. If you have 3 shards with 5 nodes each the process will upgrade 3 nodes at the same time, 1 node from each shard --- shard1node5, shard2node5, shard3node5 ... etc ...)
 5. Once all `SECONDARY` nodes for the given shard are upgraded, stepdown the `PRIMARY` and upgrade it
 6. Upgrade 1 Mongos router at a time to prevent outages
 7. Re-enable balancers

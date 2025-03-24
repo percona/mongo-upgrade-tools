@@ -80,7 +80,7 @@
 ####################
 # Mongod Validation
 ####################
-- name: MongoDB Version Validation
+- name: Pre-Upgrade MongoDB Version Validation
   hosts: cfg:shard*:rs
   any_errors_fatal: true  # This will make the playbook stop on the first failure
   become: yes
@@ -141,7 +141,7 @@
 ####################
 # Mongos Validation
 ####################
-- name: Mongos Version Validation
+- name: Pre-Upgrade Mongos Version Validation
   hosts: mongos
   any_errors_fatal: true  # This will make the playbook stop on the first failure
   become: yes
@@ -247,7 +247,7 @@
 
         - name: Register FCV 
           set_fact:
-            fcv: "{{ newmongoVersion.split('.')[0] + '.' + newmongoVersion.split('.')[1] }} " 
+            fcv: "{{newmongoVersion.split('.')[0] + '.' + newmongoVersion.split('.')[1]}}" 
           when: "postupgrade is defined and 'mongos' not in group_names"
           run_once: true # This is just for informational purposes, so we just run from one of the replicaset nodes
 
@@ -272,7 +272,7 @@
               - Once you are confident that your application and the cluster are functioning as expected, you can enable these features by setting 
                 the `setFeatureCompatibilityVersion` as shown below from a Mongos (sharded cluster) or the PRIMARY node (NON sharded cluster):
 
-                db.adminCommand({ setFeatureCompatibilityVersion: '{{ fcv }}', confirm: true })
+                db.adminCommand({ setFeatureCompatibilityVersion: '{{fcv}}', confirm: true })
           when: "postupgrade is defined and 'mongos' not in group_names"
           run_once: true # This is just for informational purposes, so we just run from one of the replicaset nodes
 

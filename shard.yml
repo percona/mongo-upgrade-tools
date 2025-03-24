@@ -1,22 +1,14 @@
-- name: Loop through all shard groups and find the PRIMARY for each specific replicaset
+---
+- name: Create dynamic groups for SECONDARY nodes
   hosts: shard*
-  gather_facts: false
+  become: yes
   tags:
     - upgrade
-    - upgrade:shard
+    - upgrade:shard  
   tasks:
-    - name: Get all shard groups
-      set_fact:
-        groups_list: "{{ groups.keys() }}"
-
     - name: Include additional tasks
-      include_tasks: extras.yml    
-
-    - name: Find out the current installed MongoDB version
-      shell: >
-        mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "print(db.version().split('.').slice(0, 2).join('.'))"  
-      register: mdbVersion
-      when: arbiter is not defined # We don't need to worry about the arbiter version since we'll make sure it matches all other nodes
+      include_tasks: extras.yml 
+      when: inventory_hostname == groups[group_names[0]][0] and arbiter is not defined   
 
     # We only need to run the query below in one host of each shard, since the status would be the same for all hosts in the same shard
     - name: Find the PRIMARY node for each shard
@@ -30,19 +22,54 @@
       set_fact:
         shardPrimary: "{{ hostvars[groups[group_names[0]][0]].shardPrimaryResult.stdout }}"
 
+    # set host attribute for each so we can use it later
+    # This sets primary = true when the host is the primary
+    # We record the original group for the given host and store it as a new attribute
+    - name: Set dynamic attributes for all hosts 
+      set_fact:
+        host_attributes:
+          primary: "{{inventory_hostname == shardPrimary }}"
+          groupName: "{{ group_names }}"
+        
+    - name: Gather all shard groups
+      set_fact:
+        shard_groups: "{{ groups.keys() | select('match', '^shard[0-9]+$') | list }}"
+  
+    # Create the dynamic groups containing only secondary nodes
+    # We will have as many dynamic groups as there are secondary nodes in each shard
+    # i.e If we have 5 shards with 2 secondary nodes each, we will end up with 2 dynamic groups with 1 secondary node from each shard
+    - name: Add SECONDARY nodes only to dynamic group
+      add_host:
+        name: "{{ item }}"  # This is the host that will be added to the new group
+        groups: dynamicGroup_{{ groups[hostvars[item].host_attributes.groupName | join(', ')].index(item) }}    # This is the new group name
+        hostvars: 
+          sourceGroup: "{{ hostvars[item].host_attributes.groupName }}"  # we set this var to the original group of the host
+          dynamicGroup: "dynamicGroup_{{ groups[hostvars[item].host_attributes.groupName | join(', ')].index(item) }}" # We also store this as a hostvar
+      with_items: "{{ shard_groups | map('extract', groups) | flatten }}"
+      run_once: true
+      delegate_to: localhost
+      when: "hostvars[item].host_attributes.primary == false"  # Only add hosts where primary is false
 
-################################ 
-# Upgrade secondary shard nodes
-################################
-- name: Upgrade SECONDARY nodes
-  hosts: shard*
+
+
+######################################################################################
+# Run the tasks against the new dynamic group. This group has only the secondary nodes
+######################################################################################
+- name: SECONDARY Nodes Tasks 
+  hosts: dynamicGroup*
   become: yes
   tags:
     - upgrade
-    - upgrade:shard
-  serial: 1 # This is required to make sure one host at a time is handled, otherwise each task will run for each node in sequence
+    - upgrade:shard   
+  # If we set serial to the exact number of hosts in each dynamic group this will execute all tasks in the playbook for that given group and only proceed to the next group 
+  # once all tasks were completed on the first group. serial can't use variables defined in the playbook, so we need to count the total number of dynamic groups and also
+  # the total number of nodes in all the dynamic goups. We then determine the average number of nodes in each dynamic group and we set the serial value to this.
+  # i.e. If we have a total of 5 dynamic groups and a total of 15 nodes, this means we have an average of 3 nodes and this is the value we set the serial value to.
+  # calculate the size of each group (We use // for the division so the result is not a float)
+  serial: 
+    - "{{ groups.keys() | select('search', '^dynamicGroup') | map('extract', groups) | map('length') | sum | int // groups.keys() | select('search', '^dynamicGroup') | list | length | int}}"
   tasks:
-    - name: Upgrade SECONDARY nodes
+    - name: Begin SECONDARY Node Upgrade
       block:
         - name: Shutdown SECONDARY node
           service:
@@ -50,7 +77,6 @@
             state: stopped  
           async: 300  # Set the task to run for a maximum of 300 seconds (5 minutes)
           poll: 10    # Poll every 10 seconds to check for completion  
-          when: ansible_hostname != shardPrimary  
 
         ##########################################
         # The 2 tasks below only apply to arbiters
@@ -60,29 +86,28 @@
           register: dbpath
           changed_when: false
           failed_when: dbpath.stdout == ""
-          when: ansible_hostname != shardPrimary and arbiter is defined       
+          when: arbiter is defined       
 
         - name: Cleanup ARBITER node
           shell: rm -rf {{ dbpath.stdout }}/*
-          when: ansible_hostname != shardPrimary and arbiter is defined  
+          when: arbiter is defined  
         ################################
         # end of arbiter specific tasks
         ################################  
+
         - name: Install packages
-          include_tasks: installPackages.yml
-          when: ansible_hostname != shardPrimary  
+          include_tasks: installPackages.yml  
 
         - name: Start SECONDARY node
           service:
             name: mongod
             state: started  
-          when: ansible_hostname != shardPrimary
 
         - name: Wait for the SECONDARY node to recover
           shell: >
             mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "
             rs.status().members
-              .filter((member) => /{{ ansible_hostname }}/.test(member.name))
+              .filter((member) => /{{ inventory_hostname }}/.test(member.name))
               .map((member) => ({
                 _id: member._id,
                 name: member.name,
@@ -95,30 +120,29 @@
           until: "'SECONDARY' in shard_status.stdout or 'ARBITER' in shard_status.stdout"
           retries: 5
           delay: 10
-          when: ansible_hostname != shardPrimary
     
         - name: Node state
           debug:
             msg: |
               {{ shard_status.stdout_lines }}
-          when: ansible_hostname != shardPrimary  
+     
 
-
+   
 ############################################################################################################################################
-# We need to separate the upgrade for the primary into its own task since we have to use serial in order to upgrade one node at a time
+# We need to separate the upgrade for the primary into its own playbook since we have to use serial in order to upgrade only one node at a time
 # This means once the above tasks are complete the only remaining node left to upgrade is the current PRIMARY for each shard
 ############################################################################################################################################          
-- name: Upgrade PRIMARY Node
+- name: PRIMARY Node Only Tasks
   hosts: shard*
   become: yes
   tags:
     - upgrade
     - upgrade:shard
-  # serial is required to make sure one host at a time is handled, otherwise each task will run for each node in sequence. 
+  # serial 1 is required to make sure only one host at a time is upgraded, otherwise each task will run for each node in sequence. 
   # We still use this method since we could have multiple shards and we want each shard to be completed before moving to the next
   serial: 1 
   tasks:
-    - name: Upgrade PRIMARY node
+    - name: Begin PRIMARY Node Upgrade
       block:
         - name: Stepdown PRIMARY node
           shell: mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "rs.stepDown()"
@@ -186,11 +210,10 @@
               {{ shard_status.stdout_lines }}
           when: ansible_hostname == shardPrimary  
 
-
 #######################################
 # Get replicaset status for all shards
 #######################################
-- name: Shard Replicaset Status
+- name: Post Upgrade Status
   hosts: shard*
   become: yes
   tags:
