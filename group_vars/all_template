@@ -13,6 +13,8 @@ mongo_release: psmdb-70
 
 # packages and router_packages lists 
 # you can use a specific version instead of the default `latest` by passing the package names and version e.g. percona-server-mongodb-7.0.12-7.el9
+# Please note there has been a pmm-client package naming convention change for pmm. If using pmm2, the client package name is pmm2-client
+# if using pmm3, the client package name is pmm-client
 packages:
   - percona-server-mongodb
   - percona-backup-mongodb
@@ -48,7 +50,7 @@ CAFile: /etc/ssl/test-ca.pem
 ## Monitoring
 ##################
 
-#pmm_client_repo: pmm2-client experimental
+# What repo to use
 pmm_client_repo: pmm2-client
 #pmm_client_repo: pmm3-client
 
