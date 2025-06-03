@@ -9,14 +9,6 @@
   changed_when: false
   failed_when: mongo_port_result.stdout == ""
 
-- name: Register the mongod port
+- name: Register mongod/mongos port
   set_fact:
     mongo_port: "{{ mongo_port_result.stdout }}"
-
-- name: Find original percona repository
-  shell: percona-release show | grep psmdb | awk '{print $1}' 
-  register: old_repo
-
-- name: Store original repository
-  set_fact:
-    original_percona_repository: "{{ old_repo.stdout }}"  

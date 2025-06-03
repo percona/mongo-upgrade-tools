@@ -13,7 +13,7 @@
 # Upgrade replicasets
 - import_playbook: replicaset.yml
 
-# Upgrade shards
+# # Upgrade shards
 - import_playbook: shard.yml
 
 # Upgrade mongos

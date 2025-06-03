@@ -11,14 +11,14 @@
 - name: Disable all previously enabled percona repositories
   shell: "/usr/bin/percona-release disable all"
 
-- name: Enable MongoDB {{ mongo_release }} and tools repository
-  shell: "/usr/bin/percona-release enable {{ mongo_release }} && /usr/bin/percona-release enable tools"
+- name: Enable MongoDB {{ percona_release }} and tools repository 
+  shell: "/usr/bin/percona-release enable {{ percona_release }} && /usr/bin/percona-release enable tools"
 
 - name: Enable PMM client repository
   shell: "/usr/bin/percona-release enable {{ pmm_client_repo }}"
 
 # Mongod specific packages
-- name: Install MongoDB packages from repository -- Release {{ mongo_release }}
+- name: Install MongoDB packages from repository -- Release {{ percona_release }}
   package:
     name: "{{ item }}"
     state: latest
@@ -26,7 +26,7 @@
   when: "'mongos' not in group_names"
 
 # Mongos specific packages
-- name: Install Mongos packages from repository -- Release {{ mongo_release }}
+- name: Install Mongos packages from repository -- Release {{ percona_release }}
   package:
     name: "{{ item }}"
     state: latest

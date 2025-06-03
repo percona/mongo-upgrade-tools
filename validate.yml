@@ -98,43 +98,22 @@
 
         - name: Register current MongoDB version
           set_fact:
-            mongoVersion: "{{ mdbVersion.stdout }}" 
+            currentVersion: "{{ mdbVersion.stdout.split('.')[0] | int }}" 
           when: postupgrade is not defined  
-
-        # We need to disable the current repo and enable the new one in order to find out the version of the package that exists in the new repo
-        # Once we figure that out we disable it and re-enable the orignal repo
-        # This only needs to be done once, since all we want is to check the repo to find out the version
-        - name: Get details from MongoDB version being installed 
-          shell: |
-            percona-release disable {{ original_percona_repository }} >/dev/null
-            percona-release enable {{ mongo_release }} >/dev/null
-            yum --disablerepo="*" --enablerepo=$(yum repolist | grep psmdb | awk '{print $1}') list available | grep {{ item }} | awk 'NR==1 {print $2}' | awk -F'-' '{print $1}'
-            percona-release disable {{ mongo_release }} >/dev/null
-            percona-release enable {{ original_percona_repository }} >/dev/null
-          register: num_release
-          loop: "{{ packages }}"
-          when: "'percona-server-mongodb' in item and postupgrade is not defined"
-          run_once: true
-
-        - name: Register MongoDB version being installed
-          set_fact:
-            installVersion: "{{ num_release.results[0].stdout }}"
-          run_once: true  
-          when: postupgrade is not defined
-              
+           
         # We need to perform 2 validations:
         # 1. check if the version being installed is newer than the current version (we can't install an older version over a new version i.e. 5.0 on top of 6.0)
         # 2. check if the new version being installed is only 1 major version greater than the current version. (i.e. we can't install 7.0 on top of 5.0)
         - name: Fail if version being installed is older than the current version or 2 versions newer
           fail:
-            msg: "Can not install {{ installVersion }} because the cluster is running MongoDB {{ mongoVersion }}"
-          when: (installVersion < mongoVersion) or ((installVersion.split('.')[0] | int) - (mongoVersion.split('.')[0] | int) > 1) and postupgrade is not defined
+            msg: "Can not install MongoDB {{ mongodb_version }} because the cluster is running MongoDB {{ currentVersion }}"
+          when: ((mongodb_version | int) < (currentVersion | int)) or ((mongodb_version | int) - (currentVersion | int) > 1) and postupgrade is not defined  
 
         - name: Mongod version Check
           debug:
             msg: |
-              Current version: {{ mongoVersion }}, version being installed: {{ installVersion }}
-          run_once: true   # We got this far so it is ok to proceed. We only need to display this message once. 
+              Current version: {{ currentVersion }}, version being installed: {{ mongodb_version }}
+          run_once: true    
           when: postupgrade is not defined
 
 
@@ -159,41 +138,22 @@
 
         - name: Register current Mongos version
           set_fact:
-            mongosVersion: "{{ msVersion.stdout }}"  
+            currentMongosVersion: "{{ msVersion.stdout.split('.')[0] | int }}" 
           when: postupgrade is not defined  
-
-        # We need to disable the current repo and enable the new one in order to find out the version of the package that exists in the new repo
-        # Once we figure that out we disable it and re-enable the orignal repo
-        - name: Get details from MongoDB version being installed 
-          shell: |
-            percona-release disable {{ original_percona_repository }} >/dev/null
-            percona-release enable {{ mongo_release }} >/dev/null
-            yum --disablerepo="*" --enablerepo=$(yum repolist | grep psmdb | awk '{print $1}') list available | grep {{ item }} | awk 'NR==1 {print $2}' | awk -F'-' '{print $1}'
-            percona-release disable {{ mongo_release }} >/dev/null
-            percona-release enable {{ original_percona_repository }} >/dev/null
-          register: num_release_mongos  
-          loop: "{{ router_packages }}"
-          when: "'percona-server-mongodb-mongos' in item and postupgrade is not defined"
-          run_once: true  
-
-        - name: Register Mongos version being installed
-          set_fact:
-            installMSVersion: "{{ num_release_mongos.results[0].stdout }}"
-          run_once: true  
-          when: postupgrade is not defined
-                   
+                
         # We need to perform 2 validations:
         # 1. check if the version being installed is newer than the current version (we can't install an older version over a new version i.e. 5.0 on top of 6.0)
         # 2. check if the new version being installed is only 1 major version greater than the current version. (i.e. we can't install 7.0 on top of 5.0)
         - name: Fail if version being installed is older than the current version or 2 versions newer
           fail:
-            msg: "Can not install {{ installMSVersion }} because the cluster is running MongoDB {{ mongosVersion }}"
-          when: (installMSVersion < mongosVersion) or ((installMSVersion.split('.')[0] | int) - (mongosVersion.split('.')[0] | int) > 1) and postupgrade is not defined
+            msg: "Can not install {{ mongodb_version }} because the cluster is running MongoDB {{ currentMongosVersion }}"
+          when: ((mongodb_version | int < currentMongosVersion | int)) or ((mongodb_version | int) - (currentMongosVersion | int) > 1) and postupgrade is not defined
+
 
         - name: Mongos Version Check
           debug:
             msg: |
-              Current version: {{ mongosVersion }}, version being installed: {{ installMSVersion }}
+              Current version: {{ currentMongosVersion }}, version being installed: {{ mongodb_version }}
           run_once: true   # We got this far so it is ok to proceed. We only need to display this message once. 
           when: postupgrade is not defined
 
@@ -219,7 +179,7 @@
 
         - name: Register Mongos version
           set_fact:
-            newmongosVersion: "{{ newmsVersion.stdout }}"
+            newcurrentMongosVersion: "{{ newmsVersion.stdout }}"
           when: "postupgrade is defined and 'mongos' in group_names"         
 
         - name: Get MongoDB version installed
@@ -230,24 +190,24 @@
 
         - name: Register MongoDB version
           set_fact:
-            newmongoVersion: "{{ newmdbVersion.stdout }}" 
+            newcurrentVersion: "{{ newmdbVersion.stdout }}" 
           when: "postupgrade is defined and 'mongos' not in group_names"  
 
         - name: Mongos version installed
           debug:
             msg: |
-              Version installed: {{ newmongosVersion }}
+              Version installed: {{ newcurrentMongosVersion }}
           when: "postupgrade is defined and 'mongos' in group_names"    
 
         - name: Mongod version installed
           debug:
             msg: |
-              Version installed: {{ newmongoVersion }}
+              Version installed: {{ newcurrentVersion }}
           when: "postupgrade is defined and 'mongos' not in group_names"   
 
         - name: Register FCV 
           set_fact:
-            fcv: "{{newmongoVersion.split('.')[0] + '.' + newmongoVersion.split('.')[1]}}" 
+            fcv: "{{newcurrentVersion.split('.')[0] + '.' + newcurrentVersion.split('.')[1]}}" 
           when: "postupgrade is defined and 'mongos' not in group_names"
           run_once: true # This is just for informational purposes, so we just run from one of the replicaset nodes
 

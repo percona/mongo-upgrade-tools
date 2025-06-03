@@ -10,7 +10,6 @@
       include_tasks: extras.yml 
       when: inventory_hostname == groups[group_names[0]][0] and arbiter is not defined   
 
-    # We only need to run the query below in one host of each shard, since the status would be the same for all hosts in the same shard
     - name: Find the PRIMARY node for each shard
       shell: >
         mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval 'db = db.getSiblingDB("admin"); var primaryHost = db.runCommand({ "replSetGetStatus": 1 }).members.filter(member => member.stateStr === "PRIMARY").map(member => member.name.split(":")[0]).join(""); print(primaryHost);'
@@ -28,7 +27,7 @@
     - name: Set dynamic attributes for all hosts 
       set_fact:
         host_attributes:
-          primary: "{{inventory_hostname == shardPrimary }}"
+          primary: "{{inventory_hostname == shardPrimary or ansible_hostname == shardPrimary or ansible_fqdn == shardPrimary }}"
           groupName: "{{ group_names }}"
         
     - name: Gather all shard groups
@@ -38,7 +37,7 @@
     # Create the dynamic groups containing only secondary nodes
     # We will have as many dynamic groups as there are secondary nodes in each shard
     # i.e If we have 5 shards with 2 secondary nodes each, we will end up with 2 dynamic groups with 1 secondary node from each shard
-    - name: Add SECONDARY nodes only to dynamic group
+    - name: Add SECONDARY nodes to dynamic group
       add_host:
         name: "{{ item }}"  # This is the host that will be added to the new group
         groups: dynamicGroup_{{ groups[hostvars[item].host_attributes.groupName | join(', ')].index(item) }}    # This is the new group name
@@ -54,8 +53,9 @@
 
 ######################################################################################
 # Run the tasks against the new dynamic group. This group has only the secondary nodes
+# The tasks below do not need a WHEN clause since all hosts in this groupd are SECONDARY
 ######################################################################################
-- name: SECONDARY Nodes Tasks 
+- name: SECONDARY Node Tasks 
   hosts: dynamicGroup*
   become: yes
   tags:
@@ -71,6 +71,9 @@
   tasks:
     - name: Begin SECONDARY Node Upgrade
       block:
+        - name: Include additional tasks
+          include_tasks: extras.yml 
+
         - name: Shutdown SECONDARY node
           service:
             name: mongod
@@ -132,7 +135,7 @@
 # We need to separate the upgrade for the primary into its own playbook since we have to use serial in order to upgrade only one node at a time
 # This means once the above tasks are complete the only remaining node left to upgrade is the current PRIMARY for each shard
 ############################################################################################################################################          
-- name: PRIMARY Node Only Tasks
+- name: PRIMARY Node Tasks
   hosts: shard*
   become: yes
   tags:
@@ -147,7 +150,7 @@
         - name: Stepdown PRIMARY node
           shell: mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "rs.stepDown()"
           run_once: true
-          when: ansible_hostname == shardPrimary  
+          when: ansible_hostname == shardPrimary or ansible_fqdn == shardPrimary  
 
         - name: Wait for a new PRIMARY node to be elected
           shell: >
@@ -165,7 +168,7 @@
           retries: 5
           delay: 10
           run_once: true
-          when: ansible_hostname == shardPrimary
+          when: ansible_hostname == shardPrimary or ansible_fqdn == shardPrimary 
 
         - name: Shutdown former PRIMARY node
           service:
@@ -173,17 +176,17 @@
             state: stopped  
           async: 300  # Set the task to run for a maximum of 300 seconds (5 minutes)
           poll: 10    # Poll every 10 seconds to check for completion  
-          when: ansible_hostname == shardPrimary                  
+          when: ansible_hostname == shardPrimary or ansible_fqdn == shardPrimary                   
           
         - name: Install packages
           include_tasks: installPackages.yml
-          when: ansible_hostname == shardPrimary  
+          when: ansible_hostname == shardPrimary or ansible_fqdn == shardPrimary   
 
         - name: Start former PRIMARY node
           service:
             name: mongod
             state: started  
-          when: ansible_hostname == shardPrimary
+          when: ansible_hostname == shardPrimary or ansible_fqdn == shardPrimary 
 
         - name: Wait for the former PRIMARY node to recover and become SECONDARY
           shell: >
@@ -202,13 +205,13 @@
           until: "'SECONDARY' in shard_status.stdout"
           retries: 5
           delay: 10
-          when: ansible_hostname == shardPrimary
+          when: ansible_hostname == shardPrimary or ansible_fqdn == shardPrimary 
     
         - name: Node state
           debug:
             msg: |
               {{ shard_status.stdout_lines }}
-          when: ansible_hostname == shardPrimary  
+          when: ansible_hostname == shardPrimary or ansible_fqdn == shardPrimary   
 
 #######################################
 # Get replicaset status for all shards
@@ -233,10 +236,10 @@
           }));
         "
       register: rs_status
-      when: ansible_hostname == shardPrimary
+      when: ansible_hostname == shardPrimary or ansible_fqdn == shardPrimary 
 
     - name: Replicaset status
       debug:
         msg: |
           {{ rs_status.stdout_lines }}
-      when: ansible_hostname == shardPrimary 
+      when: ansible_hostname == shardPrimary or ansible_fqdn == shardPrimary 

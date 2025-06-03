@@ -10,18 +10,6 @@
         - name: Include additional tasks
           include_tasks: extras.yml 
 
-        - name: Figure out the mongod port
-          shell: "grep -h -i port /etc/mongod.conf | awk '{print $2}' | head -1"
-          register: mongo_port_result
-          changed_when: false
-          failed_when: mongo_port_result.stdout == ""
-          when: arbiter is not defined
-
-        - name: Register the mongod port
-          set_fact:
-            mongo_port: "{{ mongo_port_result.stdout }}"
-          when: arbiter is not defined  
-
         - name: Find out the current installed MongoDB version
           shell: >
             mongosh {{ mongo_extra_args | default("") }} -u {{ mongo_root_user }} -p {{ mongo_root_password }} --port {{ mongo_port }} --eval "print(db.version().split('.').slice(0, 2).join('.'))"  
