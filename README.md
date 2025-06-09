@@ -8,6 +8,10 @@ The upgrade process verifies the cluster's health and each node's state and it w
 
 To upgrade a MongoDB cluster, each replicaset must have at least 3 healthy nodes (non cfg nodes), which can be in any of the states: PRIMARY, SECONDARY, or ARBITER. The automated upgrade process will verify that each replicaset meets this requirement in order for the cluster to remain operational during the upgrade. This is to prevent replica sets with only two nodes from being shut down during the upgrade, as doing so would prevent the cluster from electing a new primary, potentially causing downtime. There is no minimum number of cfg nodes required, as long as they are all healthy.
 
+Outages are not expected during the upgrade process; however, depending on system load, some minor disruptions (e.g., latency spikes) may be observed. Although the MongoDB driver includes a retry mechanism, prolonged stepDown events can still manifest as latency from the application's perspective. Each node is upgraded sequentially in a controlled manner: secondary nodes are upgraded first, followed by the primary node in each replica set. Keep in mind certain applications may be more sensitive to this behavior.
+
+#### As always, we strongly recommend testing the upgrade in a non-production environment first to ensure compatibility with your specific application workload.
+
 Since this is an automated process, it assumes that you have already completed the necessary due diligence to ensure a smooth and successful upgrade. Although this is an automated process, you are still responsible for choosing the best time of day to perform the upgrade based on your workload, in addition to following the recommendations below:
 
 1. Review MongoDB Version Compatibility
@@ -19,8 +23,7 @@ Since this is an automated process, it assumes that you have already completed t
 7. Ensure Sufficient Disk Space for Upgrade
 8. Review Authentication and Security Settings Changes (if applicable)
 
-
-In order to minimize any downtime, the automated process upgrades the cluster in a "rolling" fashion:
+As mentioned above, in order to minimize any downtime, the automated process upgrades the cluster in a "rolling" fashion:
 
 1. Health checks and FCV configured (this is done for both replicaset and sharded clusters)
 
@@ -43,12 +46,10 @@ For a sharded cluster
 
 The upgrade does not set the feature compatibility version (FCV) to the new release. Enabling these backwards-incompatible features can complicate the downgrade process since you must remove any persisted backwards-incompatible features before you downgrade. It is recommended that after upgrading, you allow your deployment to run without enabling these features for a burn-in period to ensure the likelihood of downgrade is minimal. When you are confident that the likelihood of downgrade is minimal, enable these features.
 
-
 ## Quick guide
-1. Rename the template file `inventory_template` to `inventory` and make the necessary changes according to your environment 
-2. Rename the template file `group_vars/all_template` to `group_vars/all` and edit the new file variables file to choose the options, passwords, ports, etc.
-3. Rename the template file `ansible.cfg_template` to `ansible.cfg` and edit the new file ssh account to be used
-4. Make sure ansible can connect to your cluster
+1. Make the necessary changes according to your environmen to `inventory`  
+2. Rename the template file `group_vars/all_template` to `group_vars/all` and edit the file with the appropriate options, passwords, ports, etc.
+3. Make sure ansible can connect to your cluster
 
 ```
 cd ./ansible
@@ -100,6 +101,9 @@ dev-mongo-shard01svr2 arbiter=True
 
 [mongos]
 dev-mongo-router00
+
+[all:vars]
+ansible_ssh_user=your_ssh_user_here
 ```
 
 - Example of an inventory for a single replicaset:
@@ -108,10 +112,13 @@ dev-mongo-router00
 host11 
 host12
 host13
+
+[all:vars]
+ansible_ssh_user=your_ssh_user_here
 ```
 
 ## Configuration
-* The all variables file (`group_vars/all`) contains all the user-modifiable parameters. Each of these come with a small description to clarify the purpose, unless it is self-explanatory.
+* The all variables file (`group_vars/all`) contains all the user-modifiable parameters. Each of these come with a small description to clarify the purpose, unless it is self-explanatory. 
 You have to review and modify this file before running the upgrade, as the configuration is specific to each environment.
 
 ## FCV (Feature Compatibility Version)

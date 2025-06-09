@@ -1,0 +1,16 @@
+[cfg]
+da-cl01-mongodb-cfg00 mongodb_primary=True
+da-cl01-mongodb-cfg01
+da-cl01-mongodb-cfg02
+
+[shard0]
+da-cl01-mongodb-shard00svr0  mongodb_primary=True
+da-cl01-mongodb-shard00svr1
+da-cl01-mongodb-shard00arb0  arbiter=True
+
+[mongos]
+da-cl01-mongodb-mongos00
+da-cl01-mongodb-mongos01
+
+[all:vars]
+ansible_ssh_user=ec2-user
